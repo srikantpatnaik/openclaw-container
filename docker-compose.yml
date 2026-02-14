@@ -1,0 +1,14 @@
+services:
+  ai-container:
+    build: .
+    container_name: aihost
+    hostname: aihost
+    ports:
+      - "2222:22"
+    volumes:
+      - ~/.ssh:/home/aiuser/.ssh:ro
+      - ~/.gitconfig:/home/aiuser/.gitconfig:ro
+      - ~/.git-credentials:/home/aiuser/.git-credentials:ro
+    privileged: true
+    stdin_open: true
+    tty: true
