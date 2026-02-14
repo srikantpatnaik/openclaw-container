@@ -47,6 +47,7 @@ The container uses the following volume mounts:
 - `~/.ssh` → `/home/aiuser/.ssh:ro`
 - `~/.gitconfig` → `/home/aiuser/.gitconfig:ro`
 - `~/.git-credentials` → `/home/aiuser/.git-credentials:ro`
+- `~/.config/gh` → `/home/aiuser/.config/gh:ro` (for GitHub CLI configuration)
 
 Ensure your SSH keys have the proper permissions:
 - Private keys: `chmod 600`
