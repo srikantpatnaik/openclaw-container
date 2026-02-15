@@ -45,13 +45,6 @@ RUN locale-gen en_US.UTF-8 && \
 # Set working directory to aiuser's home directory
 WORKDIR /home/aiuser
 
-# Create SSH directory for aiuser with proper ownership
-RUN mkdir -p /home/aiuser/.ssh && \
-    chmod 700 /home/aiuser/.ssh && \
-    chown aiuser:aiuser /home/aiuser/.ssh && \
-    # Ensure proper permissions for home directory
-    chmod 755 /home/aiuser
-
 # Install curl first, then Node.js and npm from official website
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y nodejs && \
@@ -65,13 +58,11 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 # Install latest openclaw package (commented out to avoid build hangs)
 RUN npm install -g openclaw
 
-# Copy systemd service file for sshd
-COPY etc/systemd/system/ssh.service /etc/systemd/system/ssh.service
-
 # Configure systemd to run without problems in container
-RUN rm -f /etc/systemd/system/*.wants/*
-RUN systemctl disable systemd-networkd-wait-online
-RUN systemctl enable ssh
+RUN rm -f /etc/systemd/system/*.wants/* && \
+    systemctl disable systemd-networkd-wait-online && \
+    sed -i 's/^AcceptEnv LANG LC_\*/#AcceptEnv LANG LC_*/' /etc/ssh/sshd_config && \
+    systemctl enable ssh
 
 # Expose ports (adjust as needed)
 EXPOSE 22
