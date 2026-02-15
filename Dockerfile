@@ -1,11 +1,17 @@
 # Use debian:trixie-slim as the base image
 FROM debian:trixie-slim
 
+# Install tini init system
+RUN apt-get update && apt-get install -y \
+    tini \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
-
+ENV container=docker
+ENV TINI_SUBREAPER=true
 
 # Set hostname to "aihost"
 RUN echo "aihost" > /etc/hostname
@@ -13,7 +19,7 @@ RUN echo "aihost" > /etc/hostname
 # Remove motd
 RUN rm -v /etc/motd
 
-# Install apt packages
+# Install apt packages including systemd and other useful tools
 RUN apt-get update && apt-get install -y \
     vim \
     htop \
@@ -21,8 +27,12 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     locales \
     sudo \
-    curl && \
-    rm -rf /var/lib/apt/lists/*
+    curl \
+    systemd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Generate SSH host keys
+RUN ssh-keygen -A
 
 # Create local user "aiuser" with passwordless sudo access
 RUN useradd -m -s /bin/bash aiuser && \
@@ -55,8 +65,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 # Install latest openclaw package (commented out to avoid build hangs)
 RUN npm install -g openclaw
 
+# Copy systemd service file for sshd
+COPY etc/systemd/system/ssh.service /etc/systemd/system/ssh.service
+
+# Configure systemd to run without problems in container
+RUN rm -f /etc/systemd/system/*.wants/*
+RUN systemctl disable systemd-networkd-wait-online
+RUN systemctl enable ssh
+
 # Expose ports (adjust as needed)
 EXPOSE 22
 
-# Set the default command to start sshd in foreground
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+# Create a simple startup script that starts SSH directly
+RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
+
+# Use Tini as init process for proper signal handling, and run sshd directly
+ENTRYPOINT ["/lib/systemd/systemd"]
+CMD []
