@@ -92,9 +92,12 @@ RUN rm -f /etc/systemd/system/*.wants/* && \
 EXPOSE 22
 
 # Fix permission for .config directory
-RUN mkdir -p /home/$USERNAME/.config && \
+RUN mkdir -p /home/$USERNAME/.config/systemd && \
+    mkdir -p /home/$USERNAME/.openclaw && \
     chown -R $USERNAME:$USERNAME /home/$USERNAME/.config && \
-    chmod -R 700 /home/$USERNAME/.config
+    chown -R $USERNAME:$USERNAME /home/$USERNAME/.openclaw && \
+    chmod -R 700 /home/$USERNAME/.config && \
+    chmod -R 700 /home/$USERNAME/.openclaw
 
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
