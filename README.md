@@ -77,6 +77,12 @@ Ensure your SSH keys have the proper permissions:
 
 The container will be available at port 2222 for SSH access.
 
+
+### Openclaw
+
+#. `openclaw configure` select all defaults, and custom provider for models. 
+#. `openclaw gateway install` and then `systemctl --user start openclaw-gateway.service`
+
 ## Polkitd Consideration
 
 As a note, `polkitd` is **not required** in most standard OpenClaw container setups. It is a system-level service used for authorization and access control on Linux systems and typically runs outside of containers. If you're running applications that depend on Polkit for permissions, consider adding `polkitd` to your container environment, but for typical use cases, this is unnecessary.
