@@ -5,6 +5,7 @@ services:
     hostname: aihost
     ports:
       - "2222:22"
+      - "8082:8080"
     volumes:
       - ~/.ssh:/home/aiuser/.ssh:ro
       - ~/.gitconfig:/home/aiuser/.gitconfig:ro
