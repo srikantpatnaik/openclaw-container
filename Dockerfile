@@ -65,13 +65,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 RUN su $USERNAME -c "export NONINTERACTIVE=1 && /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
 
 # Add Homebrew PATH to .bashrc using the actual install location
-RUN echo 'export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"' >> /home/$USERNAME/.bashrc
+RUN echo 'export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$HOME/.npm-global/bin:$PATH"' >> /home/$USERNAME/.bashrc
 
 # Add Homebrew environment variables
 ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
 ENV HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
 ENV HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
-ENV PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH
+ENV PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/$USERNAME/.npm-global/bin:$PATH
 
 # Install GCC using Homebrew (run as non-root user)
 RUN su $USERNAME -c "/home/linuxbrew/.linuxbrew/bin/brew install gcc"
