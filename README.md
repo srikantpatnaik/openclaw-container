@@ -76,3 +76,15 @@ Ensure your SSH keys have the proper permissions:
 - Public keys: `chmod 644`
 
 The container will be available at port 2222 for SSH access.
+
+## Polkitd Consideration
+
+As a note, `polkitd` is **not required** in most standard OpenClaw container setups. It is a system-level service used for authorization and access control on Linux systems and typically runs outside of containers. If you're running applications that depend on Polkit for permissions, consider adding `polkitd` to your container environment, but for typical use cases, this is unnecessary.
+
+If needed, you can install `polkitd` in the Dockerfile with:
+
+```Dockerfile
+RUN apt-get update && apt-get install -y polkit
+```
+
+Ensure your container's configuration aligns with your application's needs when enabling system services like `polkitd`.
