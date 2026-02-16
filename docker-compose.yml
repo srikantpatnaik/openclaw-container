@@ -11,7 +11,13 @@ services:
       - ~/.gitconfig:/home/aiuser/.gitconfig:ro
       - ~/.git-credentials:/home/aiuser/.git-credentials:ro
       - ~/.config/gh:/home/aiuser/.config/gh:ro
+      - systemd-config:/home/aiuser/.config/systemd
+      - openclaw-data:/home/aiuser/.openclaw
     privileged: true
     stdin_open: true
     tty: true
     restart: always
+
+volumes:
+  systemd-config:
+  openclaw-data:
