@@ -77,11 +77,11 @@ Ensure your SSH keys have the proper permissions:
 
 The container will be available at port 2222 for SSH access.
 
+## OpenClaw Setup
 
-### Openclaw
-
-#. `openclaw configure` select all defaults, and custom provider for models. 
-#. `openclaw gateway install` and then `systemctl --user start openclaw-gateway.service`
+1. `openclaw configure` - Select all defaults, and custom provider for models
+2. `openclaw gateway install` - Install the gateway service
+3. `systemctl --user start openclaw-gateway.service` - Start the gateway service
 
 ## Polkitd Consideration
 
