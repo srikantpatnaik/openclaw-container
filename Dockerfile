@@ -19,7 +19,7 @@ RUN echo "aihost" > /etc/hostname
 # Remove motd
 RUN rm -v /etc/motd
 
-# Install apt packages including systemd and other useful tools
+# Install essential apt packages
 RUN apt-get update && apt-get install -y \
     vim \
     htop \
@@ -29,8 +29,10 @@ RUN apt-get update && apt-get install -y \
     sudo \
     curl \
     systemd \
-    ffmpeg \
-    build-essential \
+    wget \
+    at \
+    cron \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Set user variable for easy configuration
@@ -53,7 +55,7 @@ WORKDIR /home/$USERNAME
 
 # Install curl first, then Node.js and npm from official website
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -61,26 +63,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && \
     apt-get update && apt-get install -y gh
 
-# Install Homebrew (installs to /home/linuxbrew by default on Linux)
-RUN su $USERNAME -c "export NONINTERACTIVE=1 && /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+# Set PATH for npm global packages
+ENV PATH=/home/$USERNAME/.npm-global/bin:$PATH
+RUN echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> /home/$USERNAME/.bashrc
 
-# Add Homebrew PATH to .bashrc using the actual install location
-RUN echo 'export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$HOME/.npm-global/bin:$PATH"' >> /home/$USERNAME/.bashrc
-
-# Add Homebrew environment variables
-ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
-ENV HOMEBREW_CELLAR=/home/linuxbrew/.linuxbrew/Cellar
-ENV HOMEBREW_REPOSITORY=/home/linuxbrew/.linuxbrew/Homebrew
-ENV PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/$USERNAME/.npm-global/bin:$PATH
-
-# Install GCC using Homebrew (run as non-root user)
-RUN su $USERNAME -c "/home/linuxbrew/.linuxbrew/bin/brew install gcc"
-
-# Install latest openclaw package
-RUN su $USERNAME -c "npm config set prefix '~/.npm-global' && npm install -g openclaw"
-
-# Remove npm cache
-RUN rm -rf /home/$USERNAME/.npm
+# Install clawhub using npm
+RUN su $USERNAME -c "npm config set prefix '~/.npm-global' && npm install -g openclaw clawhub && rm -rf /home/$USERNAME/.npm" 
 
 # Configure systemd to run without problems in container
 RUN rm -f /etc/systemd/system/*.wants/* && \
