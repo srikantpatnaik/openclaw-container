@@ -19,7 +19,7 @@ RUN echo "aihost" > /etc/hostname
 # Remove motd
 RUN rm -v /etc/motd
 
-# Install essential apt packages + network tools
+# Install essential apt packages + network tools + nginx + openssl
 RUN apt-get update && apt-get install -y \
     vim \
     htop \
@@ -37,6 +37,8 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     iputils-ping \
     iproute2 \
+    nginx \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set user variable for easy configuration
@@ -81,6 +83,63 @@ RUN rm -f /etc/systemd/system/*.wants/* && \
     sed -i 's/^#Port .*/Port 2222/' /etc/ssh/sshd_config && \
     systemctl enable ssh
 
+# Generate self-signed TLS certificate
+RUN mkdir -p /etc/ssl/certs/openclaw && \
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/ssl/certs/openclaw/server.key \
+    -out /etc/ssl/certs/openclaw/server.crt \
+    -subj "/C=US/ST=Local/L=Container/O=OpenClaw/CN=aihost" \
+    -addext "subjectAltName=DNS:aihost,IP:127.0.0.1,IP:192.168.1.8" 2>/dev/null && \
+    chmod 640 /etc/ssl/certs/openclaw/server.key && \
+    chmod 644 /etc/ssl/certs/openclaw/server.crt
+
+# Create nginx reverse proxy config for HTTPS
+RUN cat > /etc/nginx/sites-available/openclaw << 'NGINX'
+server {
+    listen 8443 ssl;
+    server_name aihost localhost;
+
+    ssl_certificate /etc/ssl/certs/openclaw/server.crt;
+    ssl_certificate_key /etc/ssl/certs/openclaw/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+NGINX
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    ln -s /etc/nginx/sites-available/openclaw /etc/nginx/sites-enabled/openclaw
+
+# Create systemd service for nginx
+RUN cat > /etc/systemd/system/nginx.service << 'SERVICE'
+[Unit]
+Description=OpenClaw HTTPS Reverse Proxy
+After=network.target openclaw-gateway.service
+Requires=openclaw-gateway.service
+
+[Service]
+Type=forking
+ExecStartPre=/usr/sbin/nginx -t
+ExecStart=/usr/sbin/nginx
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s QUIT $MAINPID
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
 # Create systemd service for openclaw gateway
 RUN cat > /etc/systemd/system/openclaw-gateway.service << 'SERVICE'
 [Unit]
@@ -101,10 +160,11 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 SERVICE
-RUN ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service
+RUN ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service && \
+    ln -s /etc/systemd/system/nginx.service /etc/systemd/system/multi-user.target.wants/nginx.service
 
 # Expose ports (bridge network: mapped via docker-compose)
-EXPOSE 2222 8080
+EXPOSE 2222 8080 8443
 
 # Fix permission for .config directory
 RUN mkdir -p /home/$USERNAME/.config/systemd && \
@@ -138,7 +198,11 @@ cu.setdefault('allowedOrigins', [
     'http://127.0.0.1:8080',
     'http://192.168.1.8:8080',
     'http://localhost',
-    'http://127.0.0.1'
+    'http://127.0.0.1',
+    'https://localhost:8443',
+    'https://127.0.0.1:8443',
+    'https://192.168.1.8:8443',
+    'https://aihost:8443'
 ])
 with open(config_path, 'w') as f:
     json.dump(d, f, indent=2)
