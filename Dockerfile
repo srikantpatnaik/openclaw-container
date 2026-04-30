@@ -19,7 +19,7 @@ RUN echo "aihost" > /etc/hostname
 # Remove motd
 RUN rm -v /etc/motd
 
-# Install essential apt packages
+# Install essential apt packages + network tools
 RUN apt-get update && apt-get install -y \
     vim \
     htop \
@@ -28,11 +28,15 @@ RUN apt-get update && apt-get install -y \
     locales \
     sudo \
     curl \
-    systemd \
     wget \
+    systemd \
     at \
     cron \
     jq \
+    dnsutils \
+    netcat-openbsd \
+    iputils-ping \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set user variable for easy configuration
@@ -53,9 +57,9 @@ RUN locale-gen en_US.UTF-8 && \
 # Set working directory to aiuser's home directory
 WORKDIR /home/$USERNAME
 
-# Install curl first, then Node.js and npm from official website
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs build-essential && \
+# Install curl first, then Node.js LTS and build tools
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get update && apt-get install -y nodejs build-essential python3 make g++ && \
     rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -67,17 +71,37 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
 ENV PATH=/home/$USERNAME/.npm-global/bin:$PATH
 RUN echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> /home/$USERNAME/.bashrc
 
-# Install clawhub using npm
-RUN su $USERNAME -c "npm config set prefix '~/.npm-global' && npm install -g openclaw clawhub && rm -rf /home/$USERNAME/.npm" 
+# Install clawhub using npm (latest versions)
+RUN su $USERNAME -c "npm config set prefix '~/.npm-global' && npm install -g openclaw@latest clawhub@latest && rm -rf /home/$USERNAME/.npm"
 
 # Configure systemd to run without problems in container
 RUN rm -f /etc/systemd/system/*.wants/* && \
     systemctl disable systemd-networkd-wait-online && \
     sed -i 's/^AcceptEnv LANG LC_\*/#AcceptEnv LANG LC_*/' /etc/ssh/sshd_config && \
-    systemctl enable ssh
+    sed -i 's/^#Port .*/Port 2222/' /etc/ssh/sshd_config && \
+    systemctl enable ssh && \
+    ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service
+RUN cat > /etc/systemd/system/openclaw-gateway.service << 'SERVICE'
+[Unit]
+Description=OpenClaw Gateway
+After=network.target ssh.service
 
-# Expose ports (adjust as needed)
-EXPOSE 22
+[Service]
+Type=simple
+User=aiuser
+Environment=HOME=/home/aiuser
+Environment=PATH=/home/aiuser/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-changeme}
+ExecStart=/home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# Expose ports (bridge network: mapped via docker-compose)
+EXPOSE 2222 8080
 
 # Fix permission for .config directory
 RUN mkdir -p /home/$USERNAME/.config/systemd && \

@@ -4,8 +4,10 @@ services:
     container_name: aihost
     hostname: aihost
     ports:
-      - "2222:22"
-      - "8082:8080"
+      - "2222:2222"
+      - "8080:8080"
+    networks:
+      - openclaw-net
     volumes:
       - ~/.ssh:/home/aiuser/.ssh:ro
       - ~/.gitconfig:/home/aiuser/.gitconfig:ro
@@ -17,6 +19,10 @@ services:
     stdin_open: true
     tty: true
     restart: always
+
+networks:
+  openclaw-net:
+    driver: bridge
 
 volumes:
   systemd-config:
