@@ -151,9 +151,7 @@ Type=simple
 User=aiuser
 Environment=HOME=/home/aiuser
 Environment=PATH=/home/aiuser/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-changeme}
-ExecStartPre=/usr/local/bin/openclaw-config-init.sh
-ExecStart=/home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
+ExecStart=/usr/local/bin/openclaw-start.sh
 Restart=always
 RestartSec=10
 
@@ -174,11 +172,32 @@ RUN mkdir -p /home/$USERNAME/.config/systemd && \
     chmod -R 700 /home/$USERNAME/.config && \
     chmod -R 700 /home/$USERNAME/.openclaw
 
-# Create startup script that ensures gateway config has allowedOrigins
+# Create wrapper script that reads token from config, ensures allowedOrigins, then starts gateway
 # Placed outside volume mount so it persists across rebuilds
-RUN cat > /usr/local/bin/openclaw-config-init.sh << 'SCRIPT'
+RUN cat > /usr/local/bin/openclaw-start.sh << 'SCRIPT'
 #!/bin/bash
-/usr/bin/python3 -c "
+# Read existing token from config if present, else use env var or default
+CONFIG_TOKEN=$(python3 -c "
+import json, os
+config_path = '/home/aiuser/.openclaw/openclaw.json'
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        d = json.load(f)
+    print(d.get('gateway', {}).get('auth', {}).get('token', ''))
+" 2>/dev/null)
+
+# Use config token if found, else env var, else default
+if [ -n "$CONFIG_TOKEN" ]; then
+    TOKEN="$CONFIG_TOKEN"
+else
+    TOKEN="${OPENCLAW_GATEWAY_TOKEN:-changeme}"
+fi
+
+# Export as env var so gateway process uses it (CLI reads from config)
+export OPENCLAW_GATEWAY_TOKEN="$TOKEN"
+
+# Ensure config has auth token and allowedOrigins
+python3 -c "
 import json, os
 config_path = '/home/aiuser/.openclaw/openclaw.json'
 if os.path.exists(config_path):
@@ -190,8 +209,10 @@ gw = d.setdefault('gateway', {})
 gw.setdefault('port', 8080)
 gw.setdefault('mode', 'local')
 gw.setdefault('bind', 'lan')
-gw.setdefault('auth', {'mode': 'token', 'token': 'changeme'})
 gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
+auth = gw.setdefault('auth', {'mode': 'token', 'token': '$TOKEN'})
+auth.setdefault('mode', 'token')
+auth.setdefault('token', '$TOKEN')
 cu = gw.setdefault('controlUi', {})
 cu.setdefault('allowedOrigins', [])
 required = [
@@ -212,10 +233,12 @@ for o in required:
         cu['allowedOrigins'].append(o)
 with open(config_path, 'w') as f:
     json.dump(d, f, indent=2)
-print('Config verified:', config_path)
+print('Config verified, token length:', len('$TOKEN'))
 "
+
+exec /home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
 SCRIPT
-RUN chmod +x /usr/local/bin/openclaw-config-init.sh
+RUN chmod +x /usr/local/bin/openclaw-start.sh
 
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
