@@ -79,8 +79,9 @@ RUN rm -f /etc/systemd/system/*.wants/* && \
     systemctl disable systemd-networkd-wait-online && \
     sed -i 's/^AcceptEnv LANG LC_\*/#AcceptEnv LANG LC_*/' /etc/ssh/sshd_config && \
     sed -i 's/^#Port .*/Port 2222/' /etc/ssh/sshd_config && \
-    systemctl enable ssh && \
-    ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service
+    systemctl enable ssh
+
+# Create systemd service for openclaw gateway
 RUN cat > /etc/systemd/system/openclaw-gateway.service << 'SERVICE'
 [Unit]
 Description=OpenClaw Gateway
@@ -92,6 +93,7 @@ User=aiuser
 Environment=HOME=/home/aiuser
 Environment=PATH=/home/aiuser/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-changeme}
+ExecStartPre=/usr/local/bin/openclaw-config-init.sh
 ExecStart=/home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
 Restart=always
 RestartSec=10
@@ -99,6 +101,7 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 SERVICE
+RUN ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service
 
 # Expose ports (bridge network: mapped via docker-compose)
 EXPOSE 2222 8080
@@ -110,6 +113,39 @@ RUN mkdir -p /home/$USERNAME/.config/systemd && \
     chown -R $USERNAME:$USERNAME /home/$USERNAME/.openclaw && \
     chmod -R 700 /home/$USERNAME/.config && \
     chmod -R 700 /home/$USERNAME/.openclaw
+
+# Create startup script that ensures gateway config has allowedOrigins
+# Placed outside volume mount so it persists across rebuilds
+RUN cat > /usr/local/bin/openclaw-config-init.sh << 'SCRIPT'
+#!/bin/bash
+/usr/bin/python3 -c "
+import json, os
+config_path = '/home/aiuser/.openclaw/openclaw.json'
+if os.path.exists(config_path):
+    with open(config_path) as f:
+        d = json.load(f)
+else:
+    d = {}
+gw = d.setdefault('gateway', {})
+gw.setdefault('port', 8080)
+gw.setdefault('mode', 'local')
+gw.setdefault('bind', 'lan')
+gw.setdefault('auth', {'mode': 'token', 'token': 'changeme'})
+gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
+cu = gw.setdefault('controlUi', {})
+cu.setdefault('allowedOrigins', [
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://192.168.1.8:8080',
+    'http://localhost',
+    'http://127.0.0.1'
+])
+with open(config_path, 'w') as f:
+    json.dump(d, f, indent=2)
+print('Config verified:', config_path)
+"
+SCRIPT
+RUN chmod +x /usr/local/bin/openclaw-config-init.sh
 
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
