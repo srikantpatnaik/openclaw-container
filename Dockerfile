@@ -198,7 +198,7 @@ export OPENCLAW_GATEWAY_TOKEN="$TOKEN"
 
 # Ensure config has auth token and allowedOrigins
 python3 -c "
-import json, os
+import json, os, time
 config_path = '/home/aiuser/.openclaw/openclaw.json'
 if os.path.exists(config_path):
     with open(config_path) as f:
@@ -213,6 +213,10 @@ gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
 auth = gw.setdefault('auth', {'mode': 'token', 'token': '$TOKEN'})
 auth.setdefault('mode', 'token')
 auth.setdefault('token', '$TOKEN')
+# Ensure remote config for CLI access
+gw.setdefault('remote', {'token': '$TOKEN', 'url': 'ws://127.0.0.1:8080'})
+gw['remote']['token'] = '$TOKEN'
+gw['remote']['url'] = 'ws://127.0.0.1:8080'
 cu = gw.setdefault('controlUi', {})
 cu.setdefault('allowedOrigins', [])
 required = [
@@ -235,6 +239,11 @@ with open(config_path, 'w') as f:
     json.dump(d, f, indent=2)
 print('Config verified, token length:', len('$TOKEN'))
 "
+
+# Regenerate device identity if missing (prevents "signature expired")
+if [ ! -f /home/aiuser/.openclaw/identity/device.json ]; then
+    /home/aiuser/.npm-global/bin/openclaw devices list > /dev/null 2>&1
+fi
 
 exec /home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
 SCRIPT
