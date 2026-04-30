@@ -193,7 +193,8 @@ gw.setdefault('bind', 'lan')
 gw.setdefault('auth', {'mode': 'token', 'token': 'changeme'})
 gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
 cu = gw.setdefault('controlUi', {})
-cu.setdefault('allowedOrigins', [
+cu.setdefault('allowedOrigins', [])
+required = [
     'http://localhost:8080',
     'http://127.0.0.1:8080',
     'http://192.168.1.8:8080',
@@ -202,8 +203,13 @@ cu.setdefault('allowedOrigins', [
     'https://localhost:8443',
     'https://127.0.0.1:8443',
     'https://192.168.1.8:8443',
-    'https://aihost:8443'
-])
+    'https://aihost:8443',
+    'https://localhost',
+    'https://127.0.0.1'
+]
+for o in required:
+    if o not in cu['allowedOrigins']:
+        cu['allowedOrigins'].append(o)
 with open(config_path, 'w') as f:
     json.dump(d, f, indent=2)
 print('Config verified:', config_path)
