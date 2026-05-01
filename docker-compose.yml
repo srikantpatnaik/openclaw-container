@@ -20,6 +20,8 @@ services:
     stdin_open: true
     tty: true
     restart: always
+    environment:
+      - OPENCLAW_GATEWAY_TOKEN=your-token-here
 
 networks:
   openclaw-net:

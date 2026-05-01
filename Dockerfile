@@ -94,7 +94,7 @@ Type=simple
 User=aiuser
 Environment=HOME=/home/aiuser
 Environment=PATH=/home/aiuser/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-changeme}
+EnvironmentFile=/etc/openclaw/token.env
 ExecStart=/usr/local/bin/openclaw-start.sh
 Restart=always
 RestartSec=10
@@ -134,11 +134,13 @@ AUTH_MODE=$(echo "$EXISTING_AUTH" | cut -d'|' -f1)
 CONFIG_TOKEN=$(echo "$EXISTING_AUTH" | cut -d'|' -f2)
 TRUSTED_PROXY=$(echo "$EXISTING_AUTH" | cut -d'|' -f3)
 
-# Use config token if found, else env var, else default
-if [ -n "$CONFIG_TOKEN" ]; then
+# Env var always takes priority over config file token
+if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+    TOKEN="$OPENCLAW_GATEWAY_TOKEN"
+elif [ -n "$CONFIG_TOKEN" ]; then
     TOKEN="$CONFIG_TOKEN"
 else
-    TOKEN="${OPENCLAW_GATEWAY_TOKEN:-changeme}"
+    TOKEN="changeme"
 fi
 
 # Export as env var so gateway process uses it (CLI reads from config)
@@ -260,5 +262,20 @@ RUN systemctl enable nginx
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
 
-# Use Tini as init process for proper signal handling, and run sshd directly
-ENTRYPOINT ["/lib/systemd/systemd"]
+# Wrapper entrypoint: write env vars to file, then start systemd
+RUN mkdir -p /etc/openclaw && \
+    cat > /usr/local/bin/docker-entrypoint.sh << 'ENTRYPOINT'
+#!/bin/bash
+# Write runtime env vars to file for systemd services
+echo "ENTRYPOINT: STARTING" > /dev/kmsg 2>/dev/null || true
+mkdir -p /etc/openclaw
+if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+    echo "OPENCLAW_GATEWAY_TOKEN=$OPENCLAW_GATEWAY_TOKEN" > /etc/openclaw/token.env
+else
+    echo "OPENCLAW_GATEWAY_TOKEN=changeme" > /etc/openclaw/token.env
+fi
+exec /lib/systemd/systemd "$@"
+ENTRYPOINT
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
