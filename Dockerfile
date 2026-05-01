@@ -160,6 +160,7 @@ gw.setdefault('port', 8080)
 gw.setdefault('mode', 'local')
 gw['bind'] = 'auto'
 gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
+gw['trustedProxies'] = ['127.0.0.1', '::1']
 
 # Only set auth if not already configured
 auth_mode = '$AUTH_MODE'
@@ -178,6 +179,7 @@ gw['remote']['url'] = 'ws://127.0.0.1:8080'
 
 cu = gw.setdefault('controlUi', {})
 cu.setdefault('allowedOrigins', [])
+cu['dangerouslyDisableDeviceAuth'] = True
 required = [
     'http://localhost:8080',
     'http://127.0.0.1:8080',
@@ -216,6 +218,7 @@ RUN mkdir -p /etc/nginx/ssl && \
     -addext "subjectAltName=DNS:aihost,IP:192.168.1.8,IP:127.0.0.1" 2>/dev/null
 
 # Configure nginx as HTTPS reverse proxy to gateway
+# Token is baked in — Control UI frontend reads it from localStorage
 RUN cat > /etc/nginx/sites-available/default << 'NGINX'
 server {
     listen 8443 ssl;
@@ -236,6 +239,11 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Port 8443;
+
+        # Inject token via URL fragment — frontend reads #token=...
+        sub_filter '<head>' '<head><script>(function(){var t="3dd2ece4eddf27a09106872b41441bc9ba37005f2b5769cb6c1d4040f0606ad0";var c=document.cookie.split(";").find(function(r){return r.trim().startsWith("openclaw_token_set=")});if(c)return;document.cookie="openclaw_token_set=1;path=/;max-age=31536000";var u=location.href.split("#")[0]+"#token="+t;if(u!==location.href)location.replace(u);})();</script>';
+        sub_filter_once on;
+        sub_filter_types text/html;
     }
 }
 NGINX

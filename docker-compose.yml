@@ -21,7 +21,7 @@ services:
     tty: true
     restart: always
     environment:
-      - OPENCLAW_GATEWAY_TOKEN=your-token-here
+      - OPENCLAW_GATEWAY_TOKEN=3dd2ece4eddf27a09106872b41441bc9ba37005f2b5769cb6c1d4040f0606ad0
 
 networks:
   openclaw-net:
