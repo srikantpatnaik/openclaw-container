@@ -6,6 +6,7 @@ services:
     ports:
       - "2222:2222"
       - "8080:8080"
+      - "8443:8443"
     networks:
       - openclaw-net
     volumes:

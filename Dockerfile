@@ -180,6 +180,10 @@ required = [
     'http://localhost:8080',
     'http://127.0.0.1:8080',
     'http://192.168.1.8:8080',
+    'https://192.168.1.8:8443',
+    'https://aihost:8443',
+    'https://localhost:8443',
+    'https://127.0.0.1:8443',
     'http://localhost',
     'http://127.0.0.1'
 ]
@@ -200,6 +204,58 @@ fi
 exec /home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
 SCRIPT
 RUN chmod +x /usr/local/bin/openclaw-start.sh
+
+# Generate self-signed TLS certificate
+RUN mkdir -p /etc/nginx/ssl && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/server.key \
+    -out /etc/nginx/ssl/server.crt \
+    -subj "/CN=aihost" \
+    -addext "subjectAltName=DNS:aihost,IP:192.168.1.8,IP:127.0.0.1" 2>/dev/null
+
+# Configure nginx as HTTPS reverse proxy to gateway
+RUN cat > /etc/nginx/sites-available/default << 'NGINX'
+server {
+    listen 8443 ssl;
+    server_name aihost;
+
+    ssl_certificate /etc/nginx/ssl/server.crt;
+    ssl_certificate_key /etc/nginx/ssl/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Port 8443;
+    }
+}
+NGINX
+RUN rm -f /etc/nginx/sites-enabled/default && ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+
+# Start nginx alongside SSH and gateway
+RUN cat > /etc/systemd/system/nginx.service << 'SERVICE'
+[Unit]
+Description=nginx reverse proxy
+After=network.target openclaw-gateway.service
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/nginx
+ExecReload=/usr/sbin/nginx -s reload
+ExecStop=/usr/sbin/nginx -s stop
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+RUN systemctl enable nginx
 
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
