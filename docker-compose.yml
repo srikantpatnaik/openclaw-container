@@ -1,11 +1,14 @@
 services:
   ai-container:
-    build: .
+    build:
+      context: .
+      args:
+        OPENCLAW_GATEWAY_TOKEN: 3dd2ece4eddf27a09106872b41441bc9ba37005f2b5769cb6c1d4040f0606ad0
+    image: openclaw-container-ai-container
     container_name: aihost
     hostname: aihost
     ports:
       - "2222:2222"
-      - "8080:8080"
       - "8443:8443"
     networks:
       - openclaw-net

@@ -19,7 +19,7 @@ RUN echo "aihost" > /etc/hostname
 # Remove motd
 RUN rm -v /etc/motd
 
-# Install essential apt packages + network tools + nginx + openssl
+# Install essential apt packages + network tools + openssl
 RUN apt-get update && apt-get install -y \
     vim \
     htop \
@@ -37,7 +37,6 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     iputils-ping \
     iproute2 \
-    nginx \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,6 +44,10 @@ RUN apt-get update && apt-get install -y \
 ARG USERNAME=aiuser
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
+ARG OPENCLAW_GATEWAY_TOKEN
+ARG TLS_CN=aihost
+ARG TLS_IP1=192.168.1.8
+ARG TLS_IP2=127.0.0.1
 
 # Create local user with specified UID/GID
 RUN groupadd --gid $USER_GID $USERNAME && \
@@ -76,10 +79,15 @@ RUN echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> /home/$USERNAME/.bashrc
 # Install clawhub using npm (latest versions)
 RUN su $USERNAME -c "npm config set prefix '~/.npm-global' && npm install -g openclaw@latest clawhub@latest && rm -rf /home/$USERNAME/.npm"
 
+# Inject token into Control UI HTML at build time
+RUN TOKEN="${OPENCLAW_GATEWAY_TOKEN:-changeme}" && \
+    sed -i "s|<head>|<head><script>(function(){var t=\"${TOKEN}\";var c=document.cookie.split(\";\").find(function(r){return r.trim().startsWith(\"openclaw_token_set=\")});if(c)return;document.cookie=\"openclaw_token_set=1;path=/;max-age=31536000\";var u=location.href.split(\"#\")[0]+\"#token=\"+t;if(u!==location.href)location.replace(u);})();</script>|" \
+    /home/$USERNAME/.npm-global/lib/node_modules/openclaw/dist/control-ui/index.html
+
 # Configure systemd to run without problems in container
 RUN rm -f /etc/systemd/system/*.wants/* && \
     systemctl disable systemd-networkd-wait-online && \
-    sed -i 's/^AcceptEnv LANG LC_\*/#AcceptEnv LANG LC_*/' /etc/ssh/sshd_config && \
+    sed -i 's/^AcceptEnv LANG LC_\*/#AcceptEnv LANG LC_\*/' /etc/ssh/sshd_config && \
     sed -i 's/^#Port .*/Port 2222/' /etc/ssh/sshd_config && \
     systemctl enable ssh
 
@@ -104,8 +112,8 @@ WantedBy=multi-user.target
 SERVICE
 RUN ln -s /etc/systemd/system/openclaw-gateway.service /etc/systemd/system/multi-user.target.wants/openclaw-gateway.service
 
-# Expose ports (bridge network: mapped via docker-compose)
-EXPOSE 2222 8080
+# Expose ports (SSH + gateway TLS)
+EXPOSE 2222 8443
 
 # Fix permission for .config directory
 RUN mkdir -p /home/$USERNAME/.config/systemd && \
@@ -115,7 +123,17 @@ RUN mkdir -p /home/$USERNAME/.config/systemd && \
     chmod -R 700 /home/$USERNAME/.config && \
     chmod -R 700 /home/$USERNAME/.openclaw
 
-# Create wrapper script that reads token from config, ensures allowedOrigins, then starts gateway
+# Generate self-signed TLS certificate for gateway (wildcard CN=*)
+RUN mkdir -p /etc/openclaw/tls && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/openclaw/tls/server.key \
+    -out /etc/openclaw/tls/server.crt \
+    -subj "/CN=*" \
+    -addext "subjectAltName=DNS:*,IP:127.0.0.1,IP:::1" 2>/dev/null && \
+    chmod 644 /etc/openclaw/tls/server.crt && \
+    chmod 644 /etc/openclaw/tls/server.key
+
+# Create wrapper script that reads token from config, sets up TLS + auth, then starts gateway
 # Placed outside volume mount so it persists across rebuilds
 RUN cat > /usr/local/bin/openclaw-start.sh << 'SCRIPT'
 #!/bin/bash
@@ -132,7 +150,6 @@ if os.path.exists(config_path):
 
 AUTH_MODE=$(echo "$EXISTING_AUTH" | cut -d'|' -f1)
 CONFIG_TOKEN=$(echo "$EXISTING_AUTH" | cut -d'|' -f2)
-TRUSTED_PROXY=$(echo "$EXISTING_AUTH" | cut -d'|' -f3)
 
 # Env var always takes priority over config file token
 if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
@@ -162,6 +179,12 @@ gw['bind'] = 'auto'
 gw.setdefault('tailscale', {'mode': 'off', 'resetOnExit': False})
 gw['trustedProxies'] = ['127.0.0.1', '::1']
 
+# Enable TLS with bundled self-signed cert
+gw.setdefault('tls', {})
+gw['tls']['enabled'] = True
+gw['tls']['certPath'] = '/etc/openclaw/tls/server.crt'
+gw['tls']['keyPath'] = '/etc/openclaw/tls/server.key'
+
 # Only set auth if not already configured
 auth_mode = '$AUTH_MODE'
 if not auth_mode:
@@ -173,9 +196,9 @@ else:
         auth['token'] = '$TOKEN'
 
 # Ensure remote config for CLI access
-gw.setdefault('remote', {'token': '$TOKEN', 'url': 'ws://127.0.0.1:8080'})
+gw.setdefault('remote', {'token': '$TOKEN', 'url': 'wss://127.0.0.1:8443'})
 gw['remote']['token'] = '$TOKEN'
-gw['remote']['url'] = 'ws://127.0.0.1:8080'
+gw['remote']['url'] = 'wss://127.0.0.1:8443'
 
 cu = gw.setdefault('controlUi', {})
 cu.setdefault('allowedOrigins', [])
@@ -189,7 +212,9 @@ required = [
     'https://localhost:8443',
     'https://127.0.0.1:8443',
     'http://localhost',
-    'http://127.0.0.1'
+    'http://127.0.0.1',
+    'https://*',
+    'http://*',
 ]
 for o in required:
     if o not in cu['allowedOrigins']:
@@ -205,67 +230,9 @@ if [ ! -f /home/aiuser/.openclaw/identity/device.json ]; then
     /home/aiuser/.npm-global/bin/openclaw devices list > /dev/null 2>&1
 fi
 
-exec /home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8080 --allow-unconfigured
+exec /home/aiuser/.npm-global/bin/openclaw gateway --bind lan --port 8443 --allow-unconfigured
 SCRIPT
 RUN chmod +x /usr/local/bin/openclaw-start.sh
-
-# Generate self-signed TLS certificate
-RUN mkdir -p /etc/nginx/ssl && \
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/nginx/ssl/server.key \
-    -out /etc/nginx/ssl/server.crt \
-    -subj "/CN=aihost" \
-    -addext "subjectAltName=DNS:aihost,IP:192.168.1.8,IP:127.0.0.1" 2>/dev/null
-
-# Configure nginx as HTTPS reverse proxy to gateway
-# Token is baked in — Control UI frontend reads it from localStorage
-RUN cat > /etc/nginx/sites-available/default << 'NGINX'
-server {
-    listen 8443 ssl;
-    server_name aihost;
-
-    ssl_certificate /etc/nginx/ssl/server.crt;
-    ssl_certificate_key /etc/nginx/ssl/server.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Port 8443;
-
-        # Inject token via URL fragment — frontend reads #token=...
-        sub_filter '<head>' '<head><script>(function(){var t="3dd2ece4eddf27a09106872b41441bc9ba37005f2b5769cb6c1d4040f0606ad0";var c=document.cookie.split(";").find(function(r){return r.trim().startsWith("openclaw_token_set=")});if(c)return;document.cookie="openclaw_token_set=1;path=/;max-age=31536000";var u=location.href.split("#")[0]+"#token="+t;if(u!==location.href)location.replace(u);})();</script>';
-        sub_filter_once on;
-        sub_filter_types text/html;
-    }
-}
-NGINX
-RUN rm -f /etc/nginx/sites-enabled/default && ln -s /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
-
-# Start nginx alongside SSH and gateway
-RUN cat > /etc/systemd/system/nginx.service << 'SERVICE'
-[Unit]
-Description=nginx reverse proxy
-After=network.target openclaw-gateway.service
-
-[Service]
-Type=forking
-ExecStart=/usr/sbin/nginx
-ExecReload=/usr/sbin/nginx -s reload
-ExecStop=/usr/sbin/nginx -s stop
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-RUN systemctl enable nginx
 
 # Create a simple startup script that starts SSH directly
 RUN echo '#!/bin/bash\n# Start SSH daemon directly\n/usr/sbin/sshd -D\n' > /start-ssh.sh && chmod +x /start-ssh.sh
